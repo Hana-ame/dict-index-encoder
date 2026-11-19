@@ -615,19 +615,43 @@
     return out;
   }
 
+  // 单个汉字词元：连续汉字之间不补空格（中文本来就不用空格分词）
+  function isCjkWord(w) {
+    return typeof w === 'string' && w.length === 1 && CJK_RE.test(w);
+  }
+
   function decryptText(text) {
     let out = '';
     let unknown = 0;
 
+    let prevWord = null;   // 上一个成功还原的词元
+    let pendingSep = '';   // 密文里尚未消费的分隔符
+
+    // 把密文中的一个 token 还原成原文并拼接：汉字与汉字相邻时不加空格，
+    // 其余情况（英文词、混排）用空格；原密文有换行则保留换行。
+    const emit = (word) => {
+      if (out.length === 0) {
+        out += word;
+      } else if (pendingSep.indexOf('\n') !== -1) {
+        out += '\n' + word;
+      } else if (pendingSep && !(isCjkWord(prevWord) && isCjkWord(word))) {
+        out += ' ' + word;
+      } else {
+        out += word;
+      }
+      prevWord = word;
+      pendingSep = '';
+    };
+
     // 中文格式：密文逐字对应，连续汉字之间没有分隔符
     if (state.mode === 'chinese') {
       for (const ch of text) {
-        if (ch === ' ' || ch === '\n') { out += ch; continue; }
+        if (ch === ' ' || ch === '\n') { pendingSep += ch; continue; }
         if (!CJK_RE.test(ch)) continue;
         const id = idFromChinese(ch);
         const word = (id === null) ? undefined : state.idToWord.get(id);
-        if (word !== undefined) out += word;
-        else { out += '?'; unknown++; }
+        if (word !== undefined) emit(word);
+        else { emit('?'); unknown++; }
       }
       return { text: out, unknown };
     }
@@ -635,11 +659,11 @@
     // 数字 / 字母格式：词元之间以空格或换行分隔
     for (const part of text.split(/([ \n]+)/)) {
       if (!part) continue;
-      if (/^[ \n]+$/.test(part)) { out += part; continue; }
+      if (/^[ \n]+$/.test(part)) { pendingSep += part; continue; }
       const id = tokenToId(part);
       const word = (id === null) ? undefined : state.idToWord.get(id);
-      if (word !== undefined) out += word;
-      else { out += 'unknown'; unknown++; }
+      if (word !== undefined) emit(word);
+      else { emit('unknown'); unknown++; }
     }
     return { text: out, unknown };
   }
