@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="description" content="词典索引编码器：单词映射为永久递增编号，编号编码为 a-z 字母；词表跨多次输入永久累积，原文密文双向联动。" />
-<title>词典索引编码器</title>
+<meta name="description" content="词典编号编码器：数字/字母双模式，首次出现的单词永久分配递增编号，词表可打乱，原文密文双向联动。" />
+<title>词典编号编码器</title>
 <style>
   :root {
     --bg: #0a0f1f;
@@ -15,6 +15,7 @@
     --accent: #5b8cff;
     --accent2: #22d3ee;
     --danger: #f0506e;
+    --violet: #a78bfa;
     --radius: 16px;
   }
 
@@ -98,6 +99,42 @@
 
   .stat-inline b { color: var(--accent2); font-weight: 700; }
 
+  /* ---------- 分段控件 ---------- */
+  .segmented {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px;
+    background: rgba(0,0,0,.32);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 16px;
+  }
+
+  .segmented button {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: .84rem;
+    font-weight: 600;
+    color: var(--muted);
+    padding: 9px 18px;
+    border-radius: 9px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .2s, color .2s, transform .1s;
+  }
+
+  .segmented button:hover { color: var(--text); }
+  .segmented button:active { transform: scale(.97); }
+
+  .segmented button.active {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #06101f;
+    box-shadow: 0 4px 14px rgba(91,140,255,.35);
+  }
+
   /* ---------- 双输入框 ---------- */
   .io-grid {
     display: grid;
@@ -153,18 +190,18 @@
     outline: none;
     transition: border-color .2s, box-shadow .2s;
     word-break: break-all;
-    text-transform: lowercase;
     white-space: pre-wrap;
   }
 
-  .field textarea::placeholder { color: #5c6688; text-transform: none; }
+  .field textarea::placeholder { color: #5c6688; }
 
   .field textarea:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(91,140,255,.16);
   }
 
-  #cipherText { color: #a7ecf8; }
+  #plainText { text-transform: lowercase; }
+  #cipherText { color: #a7ecf8; letter-spacing: .08em; }
 
   /* ---------- 按钮 ---------- */
   .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
@@ -208,6 +245,17 @@
     box-shadow: 0 6px 18px rgba(34,211,238,.45);
   }
 
+  .btn-shuffle {
+    background: linear-gradient(135deg, #7c3aed, #a78bfa);
+    border-color: transparent;
+    color: #f5f3ff;
+    box-shadow: 0 4px 14px rgba(139,92,246,.35);
+  }
+  .btn-shuffle:hover {
+    background: linear-gradient(135deg, #8b5cf6, #c4b5fd);
+    box-shadow: 0 6px 18px rgba(139,92,246,.45);
+  }
+
   .btn-danger {
     color: var(--danger);
     border-color: rgba(240,80,110,.35);
@@ -246,9 +294,18 @@
     border-color: rgba(91,140,255,.30);
   }
 
-  .word-id { color: var(--muted); min-width: 42px; font-size: .74rem; }
-  .word-letters { color: var(--accent2); font-weight: 700; min-width: 42px; }
-  .word-text { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+  .word-id {
+    color: var(--accent2);
+    font-weight: 700;
+    min-width: 54px;
+    font-size: .78rem;
+  }
+
+  .word-text {
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
   .empty {
     color: var(--muted);
@@ -292,6 +349,8 @@
 
   @media (max-width: 520px) {
     .btn { flex: 1; text-align: center; }
+    .segmented { display: flex; width: 100%; }
+    .segmented button { flex: 1; text-align: center; }
   }
 </style>
 </head>
@@ -299,13 +358,18 @@
 <div class="wrap">
 
   <header>
-    <h1>词典索引编码器</h1>
-    <p class="sub">单词 → 永久递增编号 → a-z 字母编码 · 词表跨输入永久累积 · 原文密文双向联动</p>
+    <h1>词典编号编码器</h1>
+    <p class="sub">数字 / 字母双模式 · 首次出现的单词永久分配递增编号 · 词表可打乱 · 原文密文双向联动</p>
   </header>
 
   <!-- 原文 / 密文 -->
   <section class="card">
     <h2>原文 / 密文</h2>
+
+    <div class="segmented" role="tablist" aria-label="密文模式">
+      <button class="active" data-mode="number" role="tab">数字模式</button>
+      <button data-mode="letter" role="tab">字母模式</button>
+    </div>
 
     <div class="io-grid">
       <div class="field">
@@ -325,22 +389,23 @@
           <span class="tag" id="cipherCount">0 字符</span>
         </label>
         <textarea id="cipherText" spellcheck="false" autocomplete="off"
-                  placeholder="密文仅含 a-z、空格与换行……"></textarea>
+                  placeholder="密文为数字串，数字之间用空格或换行分隔……"></textarea>
       </div>
     </div>
 
     <div class="actions">
       <button class="btn btn-copy-plain" id="copyPlainBtn">复制原文</button>
       <button class="btn btn-copy-cipher" id="copyCipherBtn">复制密文</button>
+      <button class="btn btn-shuffle" id="shuffleBtn">打乱词表</button>
       <button class="btn" id="clearBtn">清空输入</button>
       <button class="btn btn-danger" id="resetBtn">重置词表</button>
     </div>
 
     <p class="note">
-      每个<strong>首次出现</strong>的单词获得递增编号（1, 2, 3…），编号再编码为 a-z 字母：
-      <strong>1→a、26→z、27→aa、28→ab……</strong>。
+      每个<strong>首次出现</strong>的单词获得永久递增编号：<strong>1, 2, 3 …</strong>。
+      数字模式直接输出编号；字母模式把编号编码为 a-z（1→a、26→z、27→aa…）。
       同一单词始终映射到同一编号；词表<strong>只增不减</strong>，跨多次输入永久累积，并保存在浏览器本地。
-      建议一次性粘贴完整文本，避免逐字输入产生中间词。
+      <strong>打乱词表</strong>会重新分配所有编号，旧密文将无法用当前词表还原，但当前原文会立即生成新密文。
     </p>
   </section>
 
@@ -362,7 +427,7 @@
   'use strict';
 
   const $ = (id) => document.getElementById(id);
-  const STORAGE_KEY = 'dict_codec_v1';
+  const STORAGE_KEY = 'dict_num_codec_v1';
 
   const els = {
     plain:        $('plainText'),
@@ -374,19 +439,22 @@
     nextId:       $('nextId'),
     copyPlainBtn: $('copyPlainBtn'),
     copyCipherBtn:$('copyCipherBtn'),
+    shuffleBtn:   $('shuffleBtn'),
     clearBtn:     $('clearBtn'),
     resetBtn:     $('resetBtn'),
     toast:        $('toast')
   };
 
   const state = {
-    wordToId: new Map(),   // 单词 → 编号
-    idToWord: new Map(),   // 编号 → 单词
-    nextId: 1
+    mode: 'number',        // 'number' | 'letter'
+    wordToId: new Map(),
+    idToWord: new Map(),
+    nextId: 1,
+    lastEdited: 'plain'
   };
 
   /* ===== 编号 ↔ 字母：bijective base-26 ===== */
-  function idToLetters(n) {
+  function lettersFromId(n) {
     let s = '';
     while (n > 0) {
       n--;
@@ -396,17 +464,35 @@
     return s;
   }
 
-  function lettersToId(s) {
+  function idFromLetters(s) {
     let n = 0;
-    for (let i = 0; i < s.length; i++) {
-      n = n * 26 + (s.charCodeAt(i) - 97 + 1);
-    }
+    for (const ch of s) n = n * 26 + (ch.charCodeAt(0) - 97 + 1);
     return n;
   }
 
-  /* ===== 输入清理：只保留 a-z、空格、换行 ===== */
-  function sanitize(text) {
+  /* ===== 编号 → 密文 token ===== */
+  function idToToken(id) {
+    return state.mode === 'number' ? String(id) : lettersFromId(id);
+  }
+
+  /* ===== 密文 token → 编号 ===== */
+  function tokenToId(tok) {
+    if (state.mode === 'number') {
+      if (!/^\d+$/.test(tok)) return null;
+      return parseInt(tok, 10);
+    }
+    if (!/^[a-z]+$/.test(tok)) return null;
+    return idFromLetters(tok);
+  }
+
+  /* ===== 输入清理 ===== */
+  function sanitizePlain(text) {
     return String(text).toLowerCase().replace(/[^a-z \n]/g, '');
+  }
+
+  function sanitizeCipher(text) {
+    const re = state.mode === 'number' ? /[^0-9 \n]/g : /[^a-z \n]/g;
+    return String(text).replace(re, '');
   }
 
   function escapeHtml(s) {
@@ -421,7 +507,8 @@
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         words: [...state.wordToId.entries()],
-        nextId: state.nextId
+        nextId: state.nextId,
+        mode: state.mode
       }));
     } catch (e) { /* 忽略存储异常 */ }
   }
@@ -436,19 +523,17 @@
       state.idToWord = new Map();
       for (const [w, id] of state.wordToId) state.idToWord.set(id, w);
       state.nextId = Number(data.nextId) || 1;
+      if (data.mode === 'number' || data.mode === 'letter') state.mode = data.mode;
     } catch (e) { /* 忽略损坏数据 */ }
   }
 
-  /* ===== 加密：单词 → 编号 → 字母，保留空格/换行 ===== */
+  /* ===== 加密：单词 → 编号 token，保留空格/换行 ===== */
   function encryptText(text) {
     const parts = text.split(/([ \n]+)/);
     let out = '';
 
     for (const part of parts) {
-      if (/^[ \n]+$/.test(part)) {
-        out += part;
-        continue;
-      }
+      if (/^[ \n]+$/.test(part)) { out += part; continue; }
       if (!part.length) continue;
 
       let id = state.wordToId.get(part);
@@ -457,30 +542,29 @@
         state.wordToId.set(part, id);
         state.idToWord.set(id, part);
       }
-      out += idToLetters(id);
+      out += idToToken(id);
     }
     return out;
   }
 
-  /* ===== 解密：字母 → 编号 → 单词 ===== */
+  /* ===== 解密：token → 单词，保留空格/换行 ===== */
   function decryptText(text) {
     const parts = text.split(/([ \n]+)/);
     let out = '';
     let unknown = 0;
 
     for (const part of parts) {
-      if (/^[ \n]+$/.test(part)) {
-        out += part;
-        continue;
-      }
+      if (/^[ \n]+$/.test(part)) { out += part; continue; }
       if (!part.length) continue;
 
-      const id = lettersToId(part);
+      const id = tokenToId(part);
+      if (id === null) { out += 'unknown'; unknown++; continue; }
+
       const word = state.idToWord.get(id);
       if (word !== undefined) {
         out += word;
       } else {
-        out += '?';
+        out += 'unknown';
         unknown++;
       }
     }
@@ -498,16 +582,16 @@
 
   function renderWordTable() {
     if (state.idToWord.size === 0) {
-      els.wordTable.innerHTML = '<div class="empty">词表为空，输入原文后自动收录</div>';
+      els.wordTable.innerHTML = '<div class="empty">词表为空，在原文框输入文本后自动收录</div>';
       return;
     }
 
     const entries = [...state.idToWord.entries()].sort((a, b) => a[0] - b[0]);
     let html = '';
     for (const [id, word] of entries) {
+      const token = state.mode === 'number' ? '#' + id : '#' + id + ' · ' + lettersFromId(id);
       html += '<div class="word-entry">' +
-                '<span class="word-id">#' + id + '</span>' +
-                '<span class="word-letters">' + idToLetters(id) + '</span>' +
+                '<span class="word-id">' + token + '</span>' +
                 '<span class="word-text">' + escapeHtml(word) + '</span>' +
               '</div>';
     }
@@ -516,7 +600,8 @@
 
   /* ===== 双向联动 ===== */
   function syncFromPlain() {
-    const cleaned = sanitize(els.plain.value);
+    state.lastEdited = 'plain';
+    const cleaned = sanitizePlain(els.plain.value);
     if (cleaned !== els.plain.value) els.plain.value = cleaned;
 
     els.cipher.value = encryptText(cleaned);
@@ -525,7 +610,8 @@
   }
 
   function syncFromCipher() {
-    const cleaned = sanitize(els.cipher.value);
+    state.lastEdited = 'cipher';
+    const cleaned = sanitizeCipher(els.cipher.value);
     if (cleaned !== els.cipher.value) els.cipher.value = cleaned;
 
     const result = decryptText(cleaned);
@@ -533,8 +619,59 @@
     updateAll();
 
     if (result.unknown > 0) {
-      toast('有 ' + result.unknown + ' 个编号未收录，已用 ? 标记');
+      toast('有 ' + result.unknown + ' 个编号未收录，原文中已用 unknown 代替');
     }
+  }
+
+  /* ===== 模式切换 ===== */
+  function switchMode(mode) {
+    if (state.mode === mode) return;
+    state.mode = mode;
+
+    document.querySelectorAll('[data-mode]').forEach((b) =>
+      b.classList.toggle('active', b.dataset.mode === mode));
+
+    els.cipher.placeholder = mode === 'number'
+      ? '密文为数字串，数字之间用空格或换行分隔……'
+      : '密文为字母串，字母之间用空格或换行分隔……';
+
+    // 密文格式变了，旧密文在新模式下无意义，基于原文重新生成
+    els.cipher.value = encryptText(els.plain.value);
+    state.lastEdited = 'plain';
+    updateAll();
+    saveState();
+    toast(mode === 'number' ? '已切换到数字模式' : '已切换到字母模式');
+  }
+
+  /* ===== 打乱词表 ===== */
+  function shuffleWordTable() {
+    const words = [...state.idToWord.values()];
+    if (words.length < 2) {
+      toast('词表太短，无需打乱');
+      return;
+    }
+
+    // Fisher-Yates
+    for (let i = words.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = words[i]; words[i] = words[j]; words[j] = tmp;
+    }
+
+    state.wordToId.clear();
+    state.idToWord.clear();
+    words.forEach((w, i) => {
+      const id = i + 1;
+      state.wordToId.set(w, id);
+      state.idToWord.set(id, w);
+    });
+    state.nextId = words.length + 1;
+
+    // 用新编号重新生成密文
+    els.cipher.value = encryptText(els.plain.value);
+    state.lastEdited = 'plain';
+    saveState();
+    updateAll();
+    toast('词表已打乱，编号已重新分配');
   }
 
   /* ===== 提示条 ===== */
@@ -564,6 +701,10 @@
   els.plain.addEventListener('input', syncFromPlain);
   els.cipher.addEventListener('input', syncFromCipher);
 
+  document.querySelectorAll('[data-mode]').forEach((btn) => {
+    btn.addEventListener('click', () => switchMode(btn.dataset.mode));
+  });
+
   els.copyPlainBtn.addEventListener('click', () => {
     copyValue(els.plain, '原文为空', '原文已复制');
   });
@@ -572,9 +713,12 @@
     copyValue(els.cipher, '密文为空', '密文已复制');
   });
 
+  els.shuffleBtn.addEventListener('click', shuffleWordTable);
+
   els.clearBtn.addEventListener('click', () => {
     els.plain.value = '';
     els.cipher.value = '';
+    state.lastEdited = 'plain';
     updateAll();
     els.plain.focus();
   });
@@ -591,6 +735,7 @@
     state.nextId = 1;
     els.plain.value = '';
     els.cipher.value = '';
+    state.lastEdited = 'plain';
     saveState();
     updateAll();
     toast('词表已重置');
@@ -598,6 +743,14 @@
 
   /* ===== 初始化 ===== */
   loadState();
+
+  // 恢复模式按钮状态
+  document.querySelectorAll('[data-mode]').forEach((b) =>
+    b.classList.toggle('active', b.dataset.mode === state.mode));
+  els.cipher.placeholder = state.mode === 'number'
+    ? '密文为数字串，数字之间用空格或换行分隔……'
+    : '密文为字母串，字母之间用空格或换行分隔……';
+
   updateAll();
 })();
 </script>
