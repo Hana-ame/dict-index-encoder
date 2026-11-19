@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="description" content="词典索引编码器：单词映射为永久递增编号，编号编码为 a-z 字母；词表跨多次输入永久累积，原文密文双向联动。" />
+<title>词典索引编码器</title>
+<style>
+  :root {
+    --bg: #0a0f1f;
+    --card: rgba(255,255,255,.045);
+    --border: rgba(255,255,255,.10);
+    --text: #e9edfa;
+    --muted: #8c97ba;
+    --accent: #5b8cff;
+    --accent2: #22d3ee;
+    --danger: #f0506e;
+    --radius: 16px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background:
+      radial-gradient(1100px 560px at 8% -12%, rgba(91,140,255,.22), transparent 62%),
+      radial-gradient(900px 480px at 108% 6%, rgba(34,211,238,.16), transparent 62%),
+      var(--bg);
+    background-attachment: fixed;
+    padding: clamp(14px, 3.5vw, 40px);
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; }
+
+  header { text-align: center; margin-bottom: clamp(18px, 3vw, 30px); }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: clamp(1.35rem, 4.5vw, 2rem);
+    letter-spacing: .02em;
+    background: linear-gradient(100deg, #ffffff, #9db4ff 45%, #5be0f0);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .sub {
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(.78rem, 2.6vw, .92rem);
+    line-height: 1.6;
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: clamp(14px, 2.6vw, 22px);
+    margin-bottom: clamp(12px, 2.2vw, 18px);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  .card h2 {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 14px;
+    font-size: .8rem;
+    font-weight: 600;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .card h2::before {
+    content: "";
+    width: 3px;
+    height: 14px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, var(--accent), var(--accent2));
+  }
+
+  .stat-inline {
+    margin-left: auto;
+    font-size: .72rem;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--muted);
+    font-weight: 400;
+  }
+
+  .stat-inline b { color: var(--accent2); font-weight: 700; }
+
+  /* ---------- 双输入框 ---------- */
+  .io-grid {
+    display: grid;
+    grid-template-columns: 1fr 40px 1fr;
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--accent2);
+    user-select: none;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+  .field label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: .76rem;
+    font-weight: 600;
+    letter-spacing: .08em;
+    color: var(--muted);
+  }
+
+  .field label .tag {
+    font-weight: 400;
+    font-size: .72rem;
+    letter-spacing: 0;
+    color: #68729a;
+    white-space: nowrap;
+  }
+
+  .field textarea {
+    width: 100%;
+    min-height: 190px;
+    padding: 13px 14px;
+    resize: vertical;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: rgba(0,0,0,.28);
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 16px;
+    line-height: 1.7;
+    letter-spacing: .04em;
+    outline: none;
+    transition: border-color .2s, box-shadow .2s;
+    word-break: break-all;
+    text-transform: lowercase;
+    white-space: pre-wrap;
+  }
+
+  .field textarea::placeholder { color: #5c6688; text-transform: none; }
+
+  .field textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(91,140,255,.16);
+  }
+
+  #cipherText { color: #a7ecf8; }
+
+  /* ---------- 按钮 ---------- */
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+
+  .btn {
+    appearance: none;
+    cursor: pointer;
+    font: inherit;
+    font-size: .82rem;
+    font-weight: 600;
+    padding: 9px 18px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,.06);
+    color: var(--text);
+    transition: background .2s, border-color .2s, transform .1s, box-shadow .2s;
+  }
+
+  .btn:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.22); }
+  .btn:active { transform: scale(.97); }
+
+  .btn-copy-plain {
+    background: linear-gradient(135deg, #3b6fe0, #5b8cff);
+    border-color: transparent;
+    color: #f0f6ff;
+    box-shadow: 0 4px 14px rgba(59,111,224,.35);
+  }
+  .btn-copy-plain:hover {
+    background: linear-gradient(135deg, #4a7ef0, #6f9bff);
+    box-shadow: 0 6px 18px rgba(59,111,224,.45);
+  }
+
+  .btn-copy-cipher {
+    background: linear-gradient(135deg, #0ea5c4, #22d3ee);
+    border-color: transparent;
+    color: #04141b;
+    box-shadow: 0 4px 14px rgba(34,211,238,.35);
+  }
+  .btn-copy-cipher:hover {
+    background: linear-gradient(135deg, #1cb9d8, #4bdef5);
+    box-shadow: 0 6px 18px rgba(34,211,238,.45);
+  }
+
+  .btn-danger {
+    color: var(--danger);
+    border-color: rgba(240,80,110,.35);
+    background: rgba(240,80,110,.08);
+  }
+  .btn-danger:hover {
+    background: rgba(240,80,110,.16);
+    border-color: rgba(240,80,110,.55);
+  }
+
+  /* ---------- 词表 ---------- */
+  .word-table {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 8px;
+    max-height: 420px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .word-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: rgba(255,255,255,.035);
+    border: 1px solid rgba(255,255,255,.07);
+    font-family: ui-monospace, monospace;
+    font-size: .82rem;
+    transition: background .18s, border-color .18s;
+  }
+
+  .word-entry:hover {
+    background: rgba(91,140,255,.10);
+    border-color: rgba(91,140,255,.30);
+  }
+
+  .word-id { color: var(--muted); min-width: 42px; font-size: .74rem; }
+  .word-letters { color: var(--accent2); font-weight: 700; min-width: 42px; }
+  .word-text { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+
+  .empty {
+    color: var(--muted);
+    font-size: .82rem;
+    text-align: center;
+    padding: 24px 0;
+    grid-column: 1 / -1;
+  }
+
+  .note {
+    margin-top: 12px;
+    font-size: .76rem;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+  .note strong { color: var(--accent2); font-weight: 600; }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 26px;
+    transform: translate(-50%, 20px);
+    padding: 10px 20px;
+    border-radius: 12px;
+    background: rgba(20,28,50,.95);
+    border: 1px solid var(--border);
+    box-shadow: 0 8px 30px rgba(0,0,0,.5);
+    font-size: .85rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .28s, transform .28s;
+    z-index: 99;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  @media (max-width: 760px) {
+    .io-grid { grid-template-columns: 1fr; }
+    .arrow { height: 22px; transform: rotate(90deg); }
+    .field textarea { min-height: 150px; }
+  }
+
+  @media (max-width: 520px) {
+    .btn { flex: 1; text-align: center; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>词典索引编码器</h1>
+    <p class="sub">单词 → 永久递增编号 → a-z 字母编码 · 词表跨输入永久累积 · 原文密文双向联动</p>
+  </header>
+
+  <!-- 原文 / 密文 -->
+  <section class="card">
+    <h2>原文 / 密文</h2>
+
+    <div class="io-grid">
+      <div class="field">
+        <label>
+          <span>原文</span>
+          <span class="tag" id="plainCount">0 字符</span>
+        </label>
+        <textarea id="plainText" spellcheck="false" autocomplete="off"
+                  placeholder="仅支持小写字母 a-z、空格与换行……"></textarea>
+      </div>
+
+      <div class="arrow" aria-hidden="true">⇄</div>
+
+      <div class="field">
+        <label>
+          <span>密文</span>
+          <span class="tag" id="cipherCount">0 字符</span>
+        </label>
+        <textarea id="cipherText" spellcheck="false" autocomplete="off"
+                  placeholder="密文仅含 a-z、空格与换行……"></textarea>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-copy-plain" id="copyPlainBtn">复制原文</button>
+      <button class="btn btn-copy-cipher" id="copyCipherBtn">复制密文</button>
+      <button class="btn" id="clearBtn">清空输入</button>
+      <button class="btn btn-danger" id="resetBtn">重置词表</button>
+    </div>
+
+    <p class="note">
+      每个<strong>首次出现</strong>的单词获得递增编号（1, 2, 3…），编号再编码为 a-z 字母：
+      <strong>1→a、26→z、27→aa、28→ab……</strong>。
+      同一单词始终映射到同一编号；词表<strong>只增不减</strong>，跨多次输入永久累积，并保存在浏览器本地。
+      建议一次性粘贴完整文本，避免逐字输入产生中间词。
+    </p>
+  </section>
+
+  <!-- 永久词表 -->
+  <section class="card">
+    <h2>
+      永久词表
+      <span class="stat-inline">已收录 <b id="wordCount">0</b> 词 · 下一个编号 <b id="nextId">1</b></span>
+    </h2>
+    <div class="word-table" id="wordTable"></div>
+  </section>
+
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const STORAGE_KEY = 'dict_codec_v1';
+
+  const els = {
+    plain:        $('plainText'),
+    cipher:       $('cipherText'),
+    plainCount:   $('plainCount'),
+    cipherCount:  $('cipherCount'),
+    wordTable:    $('wordTable'),
+    wordCount:    $('wordCount'),
+    nextId:       $('nextId'),
+    copyPlainBtn: $('copyPlainBtn'),
+    copyCipherBtn:$('copyCipherBtn'),
+    clearBtn:     $('clearBtn'),
+    resetBtn:     $('resetBtn'),
+    toast:        $('toast')
+  };
+
+  const state = {
+    wordToId: new Map(),   // 单词 → 编号
+    idToWord: new Map(),   // 编号 → 单词
+    nextId: 1
+  };
+
+  /* ===== 编号 ↔ 字母：bijective base-26 ===== */
+  function idToLetters(n) {
+    let s = '';
+    while (n > 0) {
+      n--;
+      s = String.fromCharCode(97 + (n % 26)) + s;
+      n = Math.floor(n / 26);
+    }
+    return s;
+  }
+
+  function lettersToId(s) {
+    let n = 0;
+    for (let i = 0; i < s.length; i++) {
+      n = n * 26 + (s.charCodeAt(i) - 97 + 1);
+    }
+    return n;
+  }
+
+  /* ===== 输入清理：只保留 a-z、空格、换行 ===== */
+  function sanitize(text) {
+    return String(text).toLowerCase().replace(/[^a-z \n]/g, '');
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  /* ===== 持久化 ===== */
+  function saveState() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        words: [...state.wordToId.entries()],
+        nextId: state.nextId
+      }));
+    } catch (e) { /* 忽略存储异常 */ }
+  }
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (!data || !Array.isArray(data.words)) return;
+      state.wordToId = new Map(data.words);
+      state.idToWord = new Map();
+      for (const [w, id] of state.wordToId) state.idToWord.set(id, w);
+      state.nextId = Number(data.nextId) || 1;
+    } catch (e) { /* 忽略损坏数据 */ }
+  }
+
+  /* ===== 加密：单词 → 编号 → 字母，保留空格/换行 ===== */
+  function encryptText(text) {
+    const parts = text.split(/([ \n]+)/);
+    let out = '';
+
+    for (const part of parts) {
+      if (/^[ \n]+$/.test(part)) {
+        out += part;
+        continue;
+      }
+      if (!part.length) continue;
+
+      let id = state.wordToId.get(part);
+      if (id === undefined) {
+        id = state.nextId++;
+        state.wordToId.set(part, id);
+        state.idToWord.set(id, part);
+      }
+      out += idToLetters(id);
+    }
+    return out;
+  }
+
+  /* ===== 解密：字母 → 编号 → 单词 ===== */
+  function decryptText(text) {
+    const parts = text.split(/([ \n]+)/);
+    let out = '';
+    let unknown = 0;
+
+    for (const part of parts) {
+      if (/^[ \n]+$/.test(part)) {
+        out += part;
+        continue;
+      }
+      if (!part.length) continue;
+
+      const id = lettersToId(part);
+      const word = state.idToWord.get(id);
+      if (word !== undefined) {
+        out += word;
+      } else {
+        out += '?';
+        unknown++;
+      }
+    }
+    return { text: out, unknown };
+  }
+
+  /* ===== 刷新界面 ===== */
+  function updateAll() {
+    els.plainCount.textContent  = els.plain.value.length + ' 字符';
+    els.cipherCount.textContent = els.cipher.value.length + ' 字符';
+    els.wordCount.textContent   = state.wordToId.size;
+    els.nextId.textContent      = state.nextId;
+    renderWordTable();
+  }
+
+  function renderWordTable() {
+    if (state.idToWord.size === 0) {
+      els.wordTable.innerHTML = '<div class="empty">词表为空，输入原文后自动收录</div>';
+      return;
+    }
+
+    const entries = [...state.idToWord.entries()].sort((a, b) => a[0] - b[0]);
+    let html = '';
+    for (const [id, word] of entries) {
+      html += '<div class="word-entry">' +
+                '<span class="word-id">#' + id + '</span>' +
+                '<span class="word-letters">' + idToLetters(id) + '</span>' +
+                '<span class="word-text">' + escapeHtml(word) + '</span>' +
+              '</div>';
+    }
+    els.wordTable.innerHTML = html;
+  }
+
+  /* ===== 双向联动 ===== */
+  function syncFromPlain() {
+    const cleaned = sanitize(els.plain.value);
+    if (cleaned !== els.plain.value) els.plain.value = cleaned;
+
+    els.cipher.value = encryptText(cleaned);
+    updateAll();
+    saveState();
+  }
+
+  function syncFromCipher() {
+    const cleaned = sanitize(els.cipher.value);
+    if (cleaned !== els.cipher.value) els.cipher.value = cleaned;
+
+    const result = decryptText(cleaned);
+    els.plain.value = result.text;
+    updateAll();
+
+    if (result.unknown > 0) {
+      toast('有 ' + result.unknown + ' 个编号未收录，已用 ? 标记');
+    }
+  }
+
+  /* ===== 提示条 ===== */
+  let toastTimer;
+  function toast(msg) {
+    els.toast.textContent = msg;
+    els.toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2200);
+  }
+
+  /* ===== 复制 ===== */
+  async function copyValue(el, emptyMsg, okMsg) {
+    const text = el.value;
+    if (!text) { toast(emptyMsg); return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(okMsg);
+    } catch (err) {
+      el.select();
+      document.execCommand('copy');
+      toast(okMsg);
+    }
+  }
+
+  /* ===== 事件 ===== */
+  els.plain.addEventListener('input', syncFromPlain);
+  els.cipher.addEventListener('input', syncFromCipher);
+
+  els.copyPlainBtn.addEventListener('click', () => {
+    copyValue(els.plain, '原文为空', '原文已复制');
+  });
+
+  els.copyCipherBtn.addEventListener('click', () => {
+    copyValue(els.cipher, '密文为空', '密文已复制');
+  });
+
+  els.clearBtn.addEventListener('click', () => {
+    els.plain.value = '';
+    els.cipher.value = '';
+    updateAll();
+    els.plain.focus();
+  });
+
+  els.resetBtn.addEventListener('click', () => {
+    if (state.wordToId.size === 0 && !els.plain.value && !els.cipher.value) {
+      toast('词表已经是空的');
+      return;
+    }
+    if (!confirm('确定要重置词表吗？所有已收录的单词、编号以及当前输入都会被清空。')) return;
+
+    state.wordToId.clear();
+    state.idToWord.clear();
+    state.nextId = 1;
+    els.plain.value = '';
+    els.cipher.value = '';
+    saveState();
+    updateAll();
+    toast('词表已重置');
+  });
+
+  /* ===== 初始化 ===== */
+  loadState();
+  updateAll();
+})();
+</script>
+</body>
+</html>
