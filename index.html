@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="description" content="词典编号编码器：数字 / 字母 / 中文三模式，中文模式使用 2 万字码表覆盖 3K+ 常用汉字，一个汉字对应一个密文字符，双向可逆。" />
+<meta name="description" content="词典编号编码器：原文支持英文与汉字，密文可选数字 / 字母 / 汉字三种格式，词元共享同一份永久词表，任意组合双向可逆。" />
 <title>词典编号编码器 · 中文码表 2 万字</title>
 <style>
   :root {
@@ -362,17 +362,17 @@
 
   <header>
     <h1>词典编号编码器</h1>
-    <p class="sub">数字 / 字母 / 中文三模式 · 中文码表 20992 字（覆盖 3K+ 常用字） · 一个汉字对应一个密文字符 · 双向可逆</p>
+    <p class="sub">原文支持英文与汉字 · 密文可选数字 / 字母 / 汉字格式 · 汉字码表 20992 字 · 双向可逆</p>
   </header>
 
   <!-- 原文 / 密文 -->
   <section class="card">
     <h2>原文 / 密文</h2>
 
-    <div class="segmented" role="tablist" aria-label="密文模式">
-      <button class="active" data-mode="number" role="tab">数字模式</button>
-      <button data-mode="letter" role="tab">字母模式</button>
-      <button data-mode="chinese" role="tab">中文模式</button>
+    <div class="segmented" role="tablist" aria-label="密文格式">
+      <button class="active" data-mode="number" role="tab">数字格式</button>
+      <button data-mode="letter" role="tab">字母格式</button>
+      <button data-mode="chinese" role="tab">汉字格式</button>
     </div>
 
     <div class="io-grid">
@@ -382,7 +382,7 @@
           <span class="tag" id="plainCount">0 字符</span>
         </label>
         <textarea id="plainText" spellcheck="false" autocomplete="off"
-                  placeholder="仅支持小写字母 a-z、空格与换行……"></textarea>
+                  placeholder="支持英文单词（a-z）、汉字、空格与换行，中英混排也可以……"></textarea>
       </div>
 
       <div class="arrow" aria-hidden="true">⇄</div>
@@ -525,18 +525,47 @@
   }
 
   /* ===== 输入清理 ===== */
+  // 原文不再按模式过滤：英文单词（a-z，自动小写）+ 汉字 + 空格/换行 都接受
   function sanitizePlain(text) {
-    if (state.mode === 'chinese') {
-      return String(text).replace(CJK_RE_G, '');
-    }
-    return String(text).toLowerCase().replace(/[^a-z \n]/g, '');
+    return String(text).toLowerCase().replace(/[^a-z \n\u4e00-\u9fff]/g, '');
   }
 
+  // 密文按当前“密文格式”过滤
   function sanitizeCipher(text) {
     if (state.mode === 'number') return String(text).replace(/[^0-9 \n]/g, '');
     if (state.mode === 'letter') return String(text).replace(/[^a-z \n]/g, '');
-    // 中文模式：密文只保留汉字（无空格、无标点）
-    return String(text).replace(CJK_RE_G, '');
+    return String(text).replace(/[^\u4e00-\u9fff \n]/g, '');
+  }
+
+  /* ===== 切分原文：一个词元 = 一串 a-z 字母，或单个汉字 ===== */
+  function tokenizePlain(text) {
+    const parts = [];
+    let word = '';
+    let ws = '';
+
+    const flushWord = () => { if (word) { parts.push({ ws: false, value: word }); word = ''; } };
+    const flushWs = () => { if (ws) { parts.push({ ws: true, value: ws }); ws = ''; } };
+
+    for (const ch of text) {
+      if (ch === ' ' || ch === '\n') { flushWord(); ws += ch; continue; }
+      flushWs();
+      if (CJK_RE.test(ch)) { flushWord(); parts.push({ ws: false, value: ch }); continue; }
+      word += ch; // 只可能是 a-z
+    }
+    flushWord();
+    flushWs();
+    return parts;
+  }
+
+  // 取词元编号，没有则分配新编号；中文格式下码表用尽时返回 null
+  function getOrCreateId(token) {
+    let id = state.wordToId.get(token);
+    if (id !== undefined) return id;
+    if (state.mode === 'chinese' && state.nextId > CODE_TABLE_LEN) return null;
+    id = state.nextId++;
+    state.wordToId.set(token, id);
+    state.idToWord.set(id, token);
+    return id;
   }
 
   function escapeHtml(s) {
@@ -571,91 +600,48 @@
     } catch (e) { /* 忽略损坏数据 */ }
   }
 
-  /* ===== 中文模式：逐字加密 / 解密 ===== */
-  function encryptChinese(text) {
+  /* ===== 加密 / 解密：原文语言与密文格式互不绑定 ===== */
+  function encryptText(text) {
     let out = '';
-    for (const ch of text) {
-      if (!CJK_RE.test(ch)) continue;
-
-      let id = state.wordToId.get(ch);
-      if (id === undefined) {
-        // 若编号超出码表容量，说明码表已用尽，直接跳过（理论上 2 万字不会发生）
-        if (state.nextId > CODE_TABLE_LEN) continue;
-        id = state.nextId++;
-        state.wordToId.set(ch, id);
-        state.idToWord.set(id, ch);
-      }
-      out += chineseFromId(id);
-    }
-    return out;
-  }
-
-  function decryptChinese(text) {
-    let out = '';
-    let unknown = 0;
-
-    for (const ch of text) {
-      if (!CJK_RE.test(ch)) continue;
-
-      const id = idFromChinese(ch);
-      if (id === null) { out += '?'; unknown++; continue; }
-
-      const word = state.idToWord.get(id);
-      // 中文模式下，只有单字汉字才是有效原文；其他（如之前英文模式收的词）标记为未知
-      if (word !== undefined && CJK_RE.test(word) && word.length === 1) {
-        out += word;
-      } else {
-        out += '?';
-        unknown++;
-      }
-    }
-    return { text: out, unknown };
-  }
-
-  /* ===== 英文模式：按空格/换行切词 ===== */
-  function encryptEnglish(text) {
-    const parts = text.split(/([ \n]+)/);
-    let out = '';
-    for (const part of parts) {
-      if (/^[ \n]+$/.test(part)) { out += part; continue; }
-      if (!part.length) continue;
-
-      let id = state.wordToId.get(part);
-      if (id === undefined) {
-        id = state.nextId++;
-        state.wordToId.set(part, id);
-        state.idToWord.set(id, part);
-      }
+    for (const part of tokenizePlain(text)) {
+      if (part.ws) { out += part.value; continue; }
+      const id = getOrCreateId(part.value);
+      if (id === null) continue;
+      // 数字 / 字母格式靠空格切分词元：连续汉字（原文无空格）也要补分隔符；
+      // 汉字格式逐字对应，不加分隔符。
+      if (state.mode !== 'chinese' && out.length > 0 && !/[ \n]$/.test(out)) out += ' ';
       out += idToToken(id);
     }
     return out;
   }
 
-  function decryptEnglish(text) {
-    const parts = text.split(/([ \n]+)/);
+  function decryptText(text) {
     let out = '';
     let unknown = 0;
-    for (const part of parts) {
+
+    // 中文格式：密文逐字对应，连续汉字之间没有分隔符
+    if (state.mode === 'chinese') {
+      for (const ch of text) {
+        if (ch === ' ' || ch === '\n') { out += ch; continue; }
+        if (!CJK_RE.test(ch)) continue;
+        const id = idFromChinese(ch);
+        const word = (id === null) ? undefined : state.idToWord.get(id);
+        if (word !== undefined) out += word;
+        else { out += '?'; unknown++; }
+      }
+      return { text: out, unknown };
+    }
+
+    // 数字 / 字母格式：词元之间以空格或换行分隔
+    for (const part of text.split(/([ \n]+)/)) {
+      if (!part) continue;
       if (/^[ \n]+$/.test(part)) { out += part; continue; }
-      if (!part.length) continue;
-
       const id = tokenToId(part);
-      if (id === null) { out += 'unknown'; unknown++; continue; }
-
-      const word = state.idToWord.get(id);
+      const word = (id === null) ? undefined : state.idToWord.get(id);
       if (word !== undefined) out += word;
       else { out += 'unknown'; unknown++; }
     }
     return { text: out, unknown };
-  }
-
-  /* ===== 统一入口 ===== */
-  function encryptText(text) {
-    return state.mode === 'chinese' ? encryptChinese(text) : encryptEnglish(text);
-  }
-
-  function decryptText(text) {
-    return state.mode === 'chinese' ? decryptChinese(text) : decryptEnglish(text);
   }
 
   /* ===== 刷新界面 ===== */
@@ -713,53 +699,41 @@
     }
   }
 
-  /* ===== 模式切换 ===== */
-  const MODE_PLACEHOLDERS = {
-    number: {
-      plain: '仅支持小写字母 a-z、空格与换行……',
-      cipher: '密文为数字串，数字之间用空格或换行分隔……'
-    },
-    letter: {
-      plain: '仅支持小写字母 a-z、空格与换行……',
-      cipher: '密文为字母串，字母之间用空格或换行分隔……'
-    },
-    chinese: {
-      plain: '仅支持中文汉字，不支持空格与标点……',
-      cipher: '密文为汉字码表字符，与原文逐字对应（无空格）……'
-    }
+  /* ===== 密文格式切换 ===== */
+  const PLAIN_PLACEHOLDER = '支持英文单词（a-z）、汉字、空格与换行，中英混排也可以……';
+
+  const CIPHER_PLACEHOLDERS = {
+    number: '密文为数字串，数字之间用空格或换行分隔……',
+    letter: '密文为字母串，字母之间用空格或换行分隔……',
+    chinese: '密文为汉字码表字符，连续汉字之间无分隔……'
   };
 
   function applyModeUI() {
     document.querySelectorAll('[data-mode]').forEach((b) =>
       b.classList.toggle('active', b.dataset.mode === state.mode));
 
-    const ph = MODE_PLACEHOLDERS[state.mode];
-    els.plain.placeholder = ph.plain;
-    els.cipher.placeholder = ph.cipher;
+    els.plain.placeholder = PLAIN_PLACEHOLDER;
+    els.cipher.placeholder = CIPHER_PLACEHOLDERS[state.mode];
 
-    els.plain.classList.toggle('chinese-mode', state.mode === 'chinese');
     els.cipher.classList.toggle('chinese-mode', state.mode === 'chinese');
 
-    if (state.mode === 'chinese') {
-      els.modeNote.innerHTML =
-        '中文模式下，每个<strong>汉字</strong>视为一个单元，首次出现获得永久递增编号。' +
-        '密文取固定码表（<strong>CJK 统一汉字基本区 U+4E00–U+9FFF，共 20992 字</strong>）中第 N 个字符，' +
-        '因此<strong>一个汉字对应一个密文字符</strong>，双向可逆。' +
-        '原文<strong>只接受汉字</strong>，空格、标点和英文字母会被自动过滤；密文同样只保留汉字。' +
-        '词表跨模式共享、只增不减，并保存在浏览器本地。' +
-        '<strong>打乱词表</strong>会重新分配所有编号，旧密文将无法还原。';
-    } else if (state.mode === 'letter') {
-      els.modeNote.innerHTML =
-        '每个<strong>首次出现</strong>的单词获得永久递增编号，密文把编号编码为 a-z：' +
-        '<strong>1→a、26→z、27→aa…</strong>。' +
-        '同一单词始终映射到同一编号；词表<strong>只增不减</strong>，跨多次输入永久累积，并保存在浏览器本地。' +
-        '<strong>打乱词表</strong>会重新分配所有编号，旧密文将无法用当前词表还原，但当前原文会立即生成新密文。';
-    } else {
-      els.modeNote.innerHTML =
-        '每个<strong>首次出现</strong>的单词获得永久递增编号：<strong>1, 2, 3 …</strong>，密文直接输出编号。' +
-        '同一单词始终映射到同一编号；词表<strong>只增不减</strong>，跨多次输入永久累积，并保存在浏览器本地。' +
-        '<strong>打乱词表</strong>会重新分配所有编号，旧密文将无法用当前词表还原，但当前原文会立即生成新密文。';
-    }
+    const head =
+      '每个<strong>首次出现</strong>的词元获得永久递增编号：' +
+      '一串 a-z 字母算一个词元，<strong>每个汉字各算一个词元</strong>。' +
+      '词元跨越原文语言、密文格式共享，<strong>只增不减</strong>，并保存在浏览器本地。';
+    const tail =
+      '<strong>打乱词表</strong>会重新分配所有编号，旧密文将无法还原，但当前原文会立即生成新密文。';
+
+    const formats = {
+      number: '当前输出：<strong>数字格式</strong>，编号直接写成数字，词元之间用空格分隔。',
+      letter: '当前输出：<strong>字母格式</strong>，编号编码为 a-z（1→a、26→z、27→aa…），词元之间用空格分隔。',
+      chinese: '当前输出：<strong>汉字格式</strong>，编号映射到固定码表（<strong>CJK 统一汉字基本区 U+4E00–U+9FFF，共 20992 字</strong>）的第 N 个字，逐字对应、无分隔符。'
+    };
+
+    els.modeNote.innerHTML =
+      head + formats[state.mode] +
+      '原文与密文<strong>双向实时联动</strong>：三种格式对同一份词表互换，密文改回原文同理。' +
+      tail;
   }
 
   function switchMode(mode) {
@@ -777,8 +751,8 @@
     updateAll();
     saveState();
 
-    const names = { number: '数字模式', letter: '字母模式', chinese: '中文模式' };
-    toast('已切换到' + names[mode]);
+    const names = { number: '数字格式', letter: '字母格式', chinese: '汉字格式' };
+    toast('密文格式已切换为' + names[mode]);
   }
 
   /* ===== 打乱词表 ===== */
