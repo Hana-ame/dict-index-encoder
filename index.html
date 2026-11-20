@@ -225,6 +225,11 @@
 
   .btn:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.22); }
   .btn:active { transform: scale(.97); }
+  .btn:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+    transform: none;
+  }
 
   .btn-copy-plain {
     background: linear-gradient(135deg, #3b6fe0, #5b8cff);
@@ -270,6 +275,58 @@
   }
 
   /* ---------- 词表 ---------- */
+  .word-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 10px 0 12px;
+  }
+  .btn-sm {
+    padding: 7px 14px;
+    font-size: .78rem;
+    border-radius: 9px;
+  }
+  .word-tools .hint {
+    margin-left: auto;
+    align-self: center;
+    font-size: .72rem;
+    color: var(--muted);
+  }
+
+  /* 导入选择对话框 */
+  dialog.dlg {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: #101830;
+    color: var(--text);
+    padding: 22px 24px;
+    max-width: min(460px, calc(100vw - 32px));
+    box-shadow: 0 24px 70px rgba(0,0,0,.6);
+  }
+  dialog.dlg::backdrop {
+    background: rgba(4,8,18,.66);
+    backdrop-filter: blur(2px);
+  }
+  dialog.dlg h3 {
+    margin: 0 0 10px;
+    font-size: 1rem;
+    letter-spacing: .01em;
+  }
+  dialog.dlg p {
+    margin: 0 0 10px;
+    font-size: .82rem;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+  dialog.dlg p b { color: var(--accent2); font-weight: 700; }
+  dialog.dlg .dlg-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 16px;
+  }
+
   .word-table {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
@@ -423,8 +480,28 @@
         · 码表容量 <b id="tableSize">0</b> 字
       </span>
     </h2>
+    <div class="word-tools">
+      <button class="btn btn-sm" id="exportBtn">导出词表</button>
+      <button class="btn btn-sm" id="importBtn">导入词表</button>
+      <input type="file" id="importFile" accept=".json,application/json" hidden />
+      <span class="hint">导出为 JSON 文件，可换设备还原同一份词表</span>
+    </div>
     <div class="word-table" id="wordTable"></div>
   </section>
+
+  <dialog class="dlg" id="importDialog">
+    <h3>导入词表</h3>
+    <p id="importSummary">文件中没有可用的词表条目。</p>
+    <p>
+      <b>覆盖</b>：清空当前词表，按文件内的编号完整还原。<br />
+      <b>合并</b>：保留当前词表，文件里出现的新词元依次追加新编号。
+    </p>
+    <div class="dlg-actions">
+      <button class="btn btn-sm" id="importCancelBtn">取消</button>
+      <button class="btn btn-sm btn-shuffle" id="importMergeBtn">合并</button>
+      <button class="btn btn-sm btn-copy-plain" id="importReplaceBtn">覆盖</button>
+    </div>
+  </dialog>
 
 </div>
 
@@ -467,6 +544,14 @@
     shuffleBtn:   $('shuffleBtn'),
     clearBtn:     $('clearBtn'),
     resetBtn:     $('resetBtn'),
+    exportBtn:    $('exportBtn'),
+    importBtn:    $('importBtn'),
+    importFile:   $('importFile'),
+    importDialog: $('importDialog'),
+    importSummary:$('importSummary'),
+    importReplaceBtn: $('importReplaceBtn'),
+    importMergeBtn:   $('importMergeBtn'),
+    importCancelBtn:  $('importCancelBtn'),
     toast:        $('toast')
   };
 
@@ -808,6 +893,155 @@
     toast('词表已打乱，编号已重新分配');
   }
 
+  /* ===== 词表导入 / 导出 ===== */
+  const WORD_RE = /^(?:[a-z]+|[\u4e00-\u9fff])$/;
+
+  function timestamp() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return '' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+           '-' + p(d.getHours()) + p(d.getMinutes());
+  }
+
+  function exportWordTable() {
+    if (state.idToWord.size === 0) {
+      toast('词表为空，没有可导出的内容');
+      return;
+    }
+
+    const words = [...state.idToWord.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([id, word]) => ({ id, word }));
+
+    const payload = {
+      app: 'dict-index-encoder',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      cipherFormat: state.mode,
+      nextId: state.nextId,
+      count: words.length,
+      words
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json;charset=utf-8'
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'word-table-' + timestamp() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+
+    toast('已导出 ' + words.length + ' 条词表');
+  }
+
+  // 兼容三种结构：{words:[{id,word}]}、{words:[[word,id]]}、{wordToId:{word:id}}
+  function normalizeImport(data) {
+    let list = null;
+    if (Array.isArray(data)) list = data;
+    else if (data && Array.isArray(data.words)) list = data.words;
+    else if (data && data.wordToId && typeof data.wordToId === 'object') {
+      list = Object.keys(data.wordToId).map((w) => ({ word: w, id: data.wordToId[w] }));
+    }
+    if (!list) return null;
+
+    const entries = [];
+    const seen = new Set();
+    let skipped = 0;
+
+    for (const item of list) {
+      let word, id;
+      if (Array.isArray(item)) { word = item[0]; id = item[1]; }
+      else if (item && typeof item === 'object') { word = item.word; id = item.id; }
+
+      word = (typeof word === 'string') ? word.toLowerCase() : '';
+      id = Number(id);
+
+      if (!WORD_RE.test(word) || !Number.isInteger(id) || id < 1 || seen.has(word)) {
+        skipped++;
+        continue;
+      }
+      seen.add(word);
+      entries.push({ id, word });
+    }
+
+    return { entries, skipped, nextId: Number(data && data.nextId) || 0 };
+  }
+
+  let pendingImport = null;
+
+  function openImportDialog(parsed) {
+    pendingImport = parsed;
+    const n = parsed.entries.length;
+
+    els.importSummary.innerHTML =
+      '文件解析出 <b>' + n + '</b> 条可用词表' +
+      (parsed.skipped ? '，另有 <b>' + parsed.skipped + '</b> 条无效或重复已忽略' : '') +
+      '。当前词表 <b>' + state.wordToId.size + '</b> 条。';
+
+    els.importReplaceBtn.disabled = n === 0;
+    els.importMergeBtn.disabled = n === 0;
+
+    if (typeof els.importDialog.showModal === 'function') els.importDialog.showModal();
+  }
+
+  function applyImport(parsed, replace) {
+    if (replace) {
+      state.wordToId.clear();
+      state.idToWord.clear();
+      state.nextId = 1;
+    }
+
+    let added = 0;
+    const sorted = parsed.entries.slice().sort((a, b) => a.id - b.id);
+
+    for (const entry of sorted) {
+      if (state.wordToId.has(entry.word)) continue; // 已收录，保留原有编号
+
+      let target = entry.id;
+      if (replace) {
+        // 覆盖模式下沿用文件内编号，冲突则顺延到下一个空位
+        while (state.idToWord.has(target)) target++;
+      } else {
+        // 合并模式一律追加新编号，避免打乱现有密文
+        target = state.nextId;
+      }
+
+      state.wordToId.set(entry.word, target);
+      state.idToWord.set(target, entry.word);
+      if (target >= state.nextId) state.nextId = target + 1;
+      added++;
+    }
+
+    // 文件里的 nextId 更大时沿用，避免编号回收
+    if (replace && parsed.nextId > state.nextId) state.nextId = parsed.nextId;
+
+    const cleaned = sanitizePlain(els.plain.value);
+    if (cleaned !== els.plain.value) els.plain.value = cleaned;
+    els.cipher.value = encryptText(cleaned);
+    state.lastEdited = 'plain';
+
+    saveState();
+    updateAll();
+    return added;
+  }
+
+  function finishImport(replace) {
+    if (!pendingImport) return;
+    const parsed = pendingImport;
+    pendingImport = null;
+
+    if (typeof els.importDialog.close === 'function') els.importDialog.close();
+
+    const added = applyImport(parsed, replace);
+    toast(replace
+      ? '词表已覆盖，共 ' + state.wordToId.size + ' 条'
+      : '已合并，新增 ' + added + ' 条');
+  }
+
   /* ===== 提示条 ===== */
   let toastTimer;
   function toast(msg) {
@@ -848,6 +1082,45 @@
   });
 
   els.shuffleBtn.addEventListener('click', shuffleWordTable);
+
+  els.exportBtn.addEventListener('click', exportWordTable);
+
+  els.importBtn.addEventListener('click', () => {
+    els.importFile.value = '';
+    els.importFile.click();
+  });
+
+  els.importFile.addEventListener('change', () => {
+    const file = els.importFile.files && els.importFile.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      let data;
+      try {
+        data = JSON.parse(String(reader.result));
+      } catch (e) {
+        toast('无法解析：不是合法的 JSON 文件');
+        return;
+      }
+
+      const parsed = normalizeImport(data);
+      if (!parsed) {
+        toast('无法识别文件格式，请使用本页导出的 JSON');
+        return;
+      }
+      openImportDialog(parsed);
+    };
+    reader.onerror = () => toast('文件读取失败');
+    reader.readAsText(file, 'utf-8');
+  });
+
+  els.importReplaceBtn.addEventListener('click', () => finishImport(true));
+  els.importMergeBtn.addEventListener('click', () => finishImport(false));
+  els.importCancelBtn.addEventListener('click', () => {
+    pendingImport = null;
+    if (typeof els.importDialog.close === 'function') els.importDialog.close();
+  });
 
   els.clearBtn.addEventListener('click', () => {
     els.plain.value = '';
